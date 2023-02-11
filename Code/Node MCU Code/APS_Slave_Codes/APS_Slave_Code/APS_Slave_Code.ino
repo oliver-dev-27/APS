@@ -1,7 +1,7 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.2
-// Firebase Test Code - Can generate random int & float and send it on firebase
+// v0.0.3
+// Firebase Test Code - Can Register Pole to Firebase
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
@@ -9,7 +9,7 @@
 
 // WIFI
 #include <Arduino.h>
-#if defined(ESP32)
+#if defined(ESP32) || defined(PICO_RP2040)
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -17,16 +17,16 @@
 
 // Firebase
 #include <Firebase_ESP_Client.h>
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
+#include <addons/TokenHelper.h>
+#include <addons/RTDBHelper.h>
 
 // CONSTANTS
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.2"
-#define FEATURE "Firebase Test Code - Can generate random int & float and send it on firebase"
+#define VERSION "v0.0.3"
+#define FEATURE "Firebase Test Code - Can Register Pole to Firebase"
 
 // WIFI
 #define WIFI_SSID "********"
@@ -38,6 +38,8 @@
 #define USER_EMAIL "********"
 #define USER_PASSWORD "********"
 
+#define DEV_ID "S000001"
+
 // VARIABLES
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -45,32 +47,21 @@
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
-unsigned long sendDataPrevMillis = 0;
-int count = 0;
 
 // SETUP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void setup() {
   Serial.begin(115200);
-  mcuShowVersion();
+  mcuShowVersion();  
   wifiConnect();
   firebaseSetup();
+  poleRegistration();
 }
 
 // LOOP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void loop() {
-
-  if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)) {
-    sendDataPrevMillis = millis();
-
-    Serial.printf("Set int... %s\n", Firebase.RTDB.setInt(&fbdo, F("/test/randomInt"), count) ? "ok" : fbdo.errorReason().c_str());
-    Serial.printf("Get int... %s\n", Firebase.RTDB.getInt(&fbdo, F("/test/randomInt")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
-
-    count++;
-
-    Serial.printf("Set float... %s\n", Firebase.RTDB.setFloat(&fbdo, F("/test/randomFloat"), 0.01 + random(0, 100)) ? "ok" : fbdo.errorReason().c_str());
-    Serial.printf("Get float... %s\n", Firebase.RTDB.getFloat(&fbdo, F("/test/randomFloat")) ? String(fbdo.to<float>()).c_str() : fbdo.errorReason().c_str());
+  if (Firebase.ready()) {
   }
 }
 
@@ -92,6 +83,7 @@ void mcuShowVersion() {
 void wifiConnect() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi");
+  unsigned long ms = millis();
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(300);
@@ -122,4 +114,26 @@ void firebaseSetup() {
   Firebase.reconnectWiFi(true);
   Firebase.setDoubleDigits(5);
   config.timeout.serverResponse = 10 * 1000;
+}
+
+void poleRegistration() {
+  if (Firebase.ready()) {
+    char devID[24] = "";
+    strcpy(devID, Firebase.RTDB.getString(&fbdo, F("/poles/"DEV_ID"/id")) ? fbdo.to<const char *>() : fbdo.errorReason().c_str());
+
+    Serial.println(devID);
+
+    if (strstr(devID, DEV_ID)) {
+      Serial.println(DEV_ID" FOUND! No need to register.");
+    } else if (strstr(devID, "path not exist")) {
+      Serial.println(DEV_ID" NOT FOUND! Registration in progress...");
+      FirebaseJson json;
+
+      json.set("id", F(DEV_ID));
+      json.set("availability", 0);
+      json.set("location/lat", F("00.000000"));
+      json.set("location/lon", F("000.000000"));
+      Serial.printf("Set "DEV_ID"... %s\n", Firebase.RTDB.set(&fbdo, F("/poles/"DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
+    }
+  }
 }
