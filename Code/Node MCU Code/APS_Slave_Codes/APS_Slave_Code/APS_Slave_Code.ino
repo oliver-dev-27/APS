@@ -1,7 +1,8 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.6
-// Firebase & RFID Test Code - Check RFID on Firebase and Light LED if verified
+// v0.0.7
+// Firebase & RFID Test Code - Update availability on Firebase and Light LED if
+//                             occupied
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
@@ -29,8 +30,8 @@
 
 // TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.6"
-#define FEATURE "Check RFID on Firebase and Light LED if verified"
+#define VERSION "v0.0.7"
+#define FEATURE "Update availability on Firebase and Light LED if occupied"
 
 // WIFI
 #define WIFI_SSID "********"
@@ -63,6 +64,8 @@ FirebaseConfig config;
 // RFID
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 String rfidString = "";
+unsigned long rfidAccessTime = 0;
+bool rfidFound = false;
 
 // SETUP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -81,12 +84,15 @@ void setup() {
 void loop() {
   if (Firebase.ready()) {
 
+    sendUnoccupied();
+
     if (!rfidRead())
       return;
 
     rfidGet();
     rfidShowToSerial();
     findRFID();
+    sendOccupied();
   }
 }
 
@@ -155,7 +161,7 @@ void poleRegistration() {
       FirebaseJson json;
 
       json.set("id", F(DEV_ID));
-      json.set("availability", 0);
+      json.set("availability", 1);
       json.set("location/lat", F("00.000000"));
       json.set("location/lon", F("000.000000"));
       Serial.printf("Set " DEV_ID "... %s\n", Firebase.RTDB.set(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
@@ -168,6 +174,18 @@ void poleRegistration() {
 void rfidSetup() {
   SPI.begin();
   rfid.PCD_Init();
+}
+
+void sendUnoccupied() {
+  if (rfidString != "" && (millis() - rfidAccessTime > 1000)) {
+    rfidString = "";
+
+    rgbGreenOn();
+
+    FirebaseJson json;
+    json.set("availability", 1);
+    Serial.printf("Set " DEV_ID " availability... %s\n", Firebase.RTDB.updateNode(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
+  }
 }
 
 bool rfidRead() {
@@ -206,11 +224,23 @@ void findRFID() {
   Serial.println(rfidCharArray);
 
   if (strcmp(rfidCharArray, rfidString.c_str()) == 0) {
+    rfidFound = true;
     Serial.println(rfidString + " FOUND!");
-    rgbGreenOn();
   } else if (strstr(rfidCharArray, "path not exist")) {
+    rfidFound = false;
     Serial.println(rfidString + " NOT FOUND!");
+  }
+}
+
+void sendOccupied() {
+  if (rfidFound) {
+    rfidAccessTime = millis();
+    
     rgbRedOn();
+    
+    FirebaseJson json;
+    json.set("availability", 0);
+    Serial.printf("Set " DEV_ID " availability... %s\n", Firebase.RTDB.updateNode(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
   }
 }
 
