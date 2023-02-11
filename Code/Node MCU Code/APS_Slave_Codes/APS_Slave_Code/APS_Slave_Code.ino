@@ -1,8 +1,7 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.7
-// Firebase & RFID Test Code - Update availability on Firebase and Light LED if
-//                             occupied
+// v0.0.8
+// Firebase & RFID Test Code - Check RFID on Firebase and Buzz if unverified
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
@@ -30,8 +29,8 @@
 
 // TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.7"
-#define FEATURE "Update availability on Firebase and Light LED if occupied"
+#define VERSION "v0.0.8"
+#define FEATURE "Check RFID on Firebase and Buzz if unverified"
 
 // WIFI
 #define WIFI_SSID "********"
@@ -46,12 +45,15 @@
 #define DEV_ID "S000001"
 
 // RFID
-const int RFID_SS_PIN = 2;
-const int RFID_RST_PIN = 0;
+const int RFID_SS_PIN = 2;   // D4
+const int RFID_RST_PIN = 0;  // D3
 
 // RGB
-const int RGB_G_PIN = 5;
-const int RGB_R_PIN = 4;
+const int RGB_G_PIN = 5;  // D1
+const int RGB_R_PIN = 4;  // D2
+
+// Buzzer
+const int BUZZER_PIN = 15;  // D8
 
 // VARIABLES
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -63,14 +65,17 @@ FirebaseConfig config;
 
 // RFID
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
-String rfidString = "";
+String rfidDataContent = "";
 unsigned long rfidAccessTime = 0;
-bool rfidFound = false;
+bool rfidIsRemoved = false;
+bool rfidIsVerified = false;
+bool rfidDetectedOnce = false;
 
 // SETUP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void setup() {
   rgbSetup();
+  buzzerSetup();
   Serial.begin(115200);
   mcuShowVersion();
   rfidSetup();
@@ -84,20 +89,134 @@ void setup() {
 void loop() {
   if (Firebase.ready()) {
 
+    detectRfidRemovalFromReader();
+    lightGreenLED();
     sendUnoccupied();
+    resetBuzzer();
 
-    if (!rfidRead())
+    if (!rfidDetectedFromReader())
       return;
+    else
+      rfidAccessTime = millis();
 
-    rfidGet();
-    rfidShowToSerial();
-    findRFID();
-    sendOccupied();
+    if (!rfidDetectedOnce) {
+      rfidDetectedOnce = true;
+      readRfidContent();
+      showRfidTagToSerial();
+      verifyRfid();
+      lightRedLED();
+      buzzBuzzer();
+      sendOccupied();
+    }
   }
 }
 
 // FUNCTIONS
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// MAIN
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void detectRfidRemovalFromReader() {
+  if (rfidDataContent != "" && (millis() - rfidAccessTime > 10)) {
+    rfidIsRemoved = true;
+    Serial.println("RFID Card Removed!");
+
+    rfidDataContent = "";
+    rfidDetectedOnce = false;
+  } else {
+    rfidIsRemoved = false;
+  }
+}
+
+void lightGreenLED() {
+  if (rfidIsRemoved) {
+    Serial.println("Light Green LED!");
+    rgbGreenOn();
+  }
+}
+
+void sendUnoccupied() {
+  if (rfidIsRemoved && rfidIsVerified) {
+    Serial.println("Availability = 1");
+    FirebaseJson json;
+    json.set("availability", 1);
+    Serial.printf("Set " DEV_ID " availability... %s\n", Firebase.RTDB.updateNode(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
+  }
+}
+
+void resetBuzzer() {
+  if (rfidIsRemoved && !rfidIsVerified) {
+    Serial.println("Buzzer Off!");
+    buzzerOff();
+  }
+}
+
+bool rfidDetectedFromReader() {
+  if (!rfid.PICC_IsNewCardPresent())
+    return false;
+
+  if (!rfid.PICC_ReadCardSerial())
+    return false;
+
+  return true;
+}
+
+void readRfidContent() {
+  rfidDataContent = "";
+
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    rfidDataContent.concat(String(rfid.uid.uidByte[i] < 0x10 ? " 0" : " "));
+    rfidDataContent.concat(String(rfid.uid.uidByte[i], HEX));
+  }
+
+  rfidDataContent.toUpperCase();
+}
+
+void showRfidTagToSerial() {
+  Serial.println();
+  Serial.print(F("UID Tag:"));
+  Serial.print(rfidDataContent);
+  Serial.println();
+}
+
+void verifyRfid() {
+  char rfidCharArray[16] = "";
+
+  String path = "/vehicles/" + rfidDataContent + "/rfid";
+  strcpy(rfidCharArray, Firebase.RTDB.getString(&fbdo, path.c_str()) ? fbdo.to<const char *>() : fbdo.errorReason().c_str());
+
+  Serial.print("UID From Firebase:");
+  Serial.println(rfidCharArray);
+
+  if (strcmp(rfidCharArray, rfidDataContent.c_str()) == 0) {
+    rfidIsVerified = true;
+    Serial.println(rfidDataContent + " RFID found!");
+  } else {
+    rfidIsVerified = false;
+    Serial.println(rfidDataContent + " RFID not found!");
+  }
+}
+
+void lightRedLED() {
+  Serial.println("Light Red LED!");
+  rgbRedOn();
+}
+
+void buzzBuzzer() {
+  if (!rfidIsVerified) {
+    Serial.println("Buzzer On!");
+    buzzerOn();
+  }
+}
+
+void sendOccupied() {
+  if (rfidIsVerified) {
+    Serial.println("Availability = 0");
+    FirebaseJson json;
+    json.set("availability", 0);
+    Serial.printf("Set " DEV_ID " availability... %s\n", Firebase.RTDB.updateNode(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
+  }
+}
 
 // VERSION
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -176,81 +295,13 @@ void rfidSetup() {
   rfid.PCD_Init();
 }
 
-void sendUnoccupied() {
-  if (rfidString != "" && (millis() - rfidAccessTime > 1000)) {
-    rfidString = "";
-
-    rgbGreenOn();
-
-    FirebaseJson json;
-    json.set("availability", 1);
-    Serial.printf("Set " DEV_ID " availability... %s\n", Firebase.RTDB.updateNode(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
-  }
-}
-
-bool rfidRead() {
-  if (!rfid.PICC_IsNewCardPresent())
-    return false;
-
-  if (!rfid.PICC_ReadCardSerial())
-    return false;
-
-  return true;
-}
-
-void rfidGet() {
-  rfidString = "";
-
-  for (byte i = 0; i < rfid.uid.size; i++) {
-    rfidString.concat(String(rfid.uid.uidByte[i] < 0x10 ? " 0" : " "));
-    rfidString.concat(String(rfid.uid.uidByte[i], HEX));
-  }
-
-  rfidString.toUpperCase();
-}
-
-void rfidShowToSerial() {
-  Serial.println();
-  Serial.print(F(" UID tag :"));
-  Serial.print(rfidString);
-  Serial.println();
-}
-
-void findRFID() {
-  char rfidCharArray[16] = "";
-  String path = "/vehicles/" + rfidString + "/rfid";
-  strcpy(rfidCharArray, Firebase.RTDB.getString(&fbdo, path.c_str()) ? fbdo.to<const char *>() : fbdo.errorReason().c_str());
-
-  Serial.println(rfidCharArray);
-
-  if (strcmp(rfidCharArray, rfidString.c_str()) == 0) {
-    rfidFound = true;
-    Serial.println(rfidString + " FOUND!");
-  } else if (strstr(rfidCharArray, "path not exist")) {
-    rfidFound = false;
-    Serial.println(rfidString + " NOT FOUND!");
-  }
-}
-
-void sendOccupied() {
-  if (rfidFound) {
-    rfidAccessTime = millis();
-    
-    rgbRedOn();
-    
-    FirebaseJson json;
-    json.set("availability", 0);
-    Serial.printf("Set " DEV_ID " availability... %s\n", Firebase.RTDB.updateNode(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
-  }
-}
-
 // LED
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void rgbSetup() {
   pinMode(RGB_G_PIN, OUTPUT);
   pinMode(RGB_R_PIN, OUTPUT);
 
-  rgbRedOn();
+  rgbGreenOn();
 }
 
 void rgbGreenOn() {
@@ -261,4 +312,18 @@ void rgbGreenOn() {
 void rgbRedOn() {
   digitalWrite(RGB_R_PIN, HIGH);
   digitalWrite(RGB_G_PIN, LOW);
+}
+
+// Buzzer
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void buzzerSetup() {
+  pinMode(BUZZER_PIN, OUTPUT);
+}
+
+void buzzerOn() {
+  digitalWrite(BUZZER_PIN, HIGH);
+}
+
+void buzzerOff() {
+  digitalWrite(BUZZER_PIN, LOW);
 }
