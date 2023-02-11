@@ -1,51 +1,77 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.1
-// RFID Test Code - Can read RFID and display RFID to Serial
+// v0.0.2
+// Firebase Test Code - Can generate random int & float and send it on firebase
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// RFID
-#include <SPI.h>
-#include <MFRC522.h>
+// WIFI
+#include <Arduino.h>
+#if defined(ESP32)
+#include <WiFi.h>
+#elif defined(ESP8266)
+#include <ESP8266WiFi.h>
+#endif
+
+// Firebase
+#include <Firebase_ESP_Client.h>
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
 
 // CONSTANTS
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// DEFINES
+// TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.1"
-#define FEATURE "RFID Test Code - Can read RFID and display RFID to Serial"
+#define VERSION "v0.0.2"
+#define FEATURE "Firebase Test Code - Can generate random int & float and send it on firebase"
 
-// RFID
-const int RFID_SS_PIN = 2;
-const int RFID_RST_PIN = 0;
+// WIFI
+#define WIFI_SSID "********"
+#define WIFI_PASSWORD "********"
+
+// Firebase
+#define API_KEY "********"
+#define DATABASE_URL "********"
+#define USER_EMAIL "********"
+#define USER_PASSWORD "********"
 
 // VARIABLES
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// RFID
-MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
-String rfidString = "";
+// Firebase
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+unsigned long sendDataPrevMillis = 0;
+int count = 0;
 
 // SETUP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void setup() {
   Serial.begin(115200);
   mcuShowVersion();
-  rfidSetup();
+  wifiConnect();
+  firebaseSetup();
 }
 
 // LOOP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void loop() {
-  if (!rfidRead())
-    return;
 
-  rfidGet();
-  rfidShowToSerial();
+  if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)) {
+    sendDataPrevMillis = millis();
+
+    Serial.printf("Set int... %s\n", Firebase.RTDB.setInt(&fbdo, F("/test/randomInt"), count) ? "ok" : fbdo.errorReason().c_str());
+    Serial.printf("Get int... %s\n", Firebase.RTDB.getInt(&fbdo, F("/test/randomInt")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
+
+    count++;
+
+    Serial.printf("Set float... %s\n", Firebase.RTDB.setFloat(&fbdo, F("/test/randomFloat"), 0.01 + random(0, 100)) ? "ok" : fbdo.errorReason().c_str());
+    Serial.printf("Get float... %s\n", Firebase.RTDB.getFloat(&fbdo, F("/test/randomFloat")) ? String(fbdo.to<float>()).c_str() : fbdo.errorReason().c_str());
+  }
 }
 
 // FUNCTIONS
@@ -61,37 +87,39 @@ void mcuShowVersion() {
   Serial.println();
 }
 
-// RFID
+// WIFI
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-void rfidSetup() {
-  SPI.begin();
-  rfid.PCD_Init();
-}
-
-bool rfidRead() {
-  if (!rfid.PICC_IsNewCardPresent())
-    return false;
-
-  if (!rfid.PICC_ReadCardSerial())
-    return false;
-
-  return true;
-}
-
-void rfidGet() {
-  rfidString = "";
-
-  for (byte i = 0; i < rfid.uid.size; i++) {
-    rfidString.concat(String(rfid.uid.uidByte[i] < 0x10 ? " 0" : " "));
-    rfidString.concat(String(rfid.uid.uidByte[i], HEX));
+void wifiConnect() {
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(300);
   }
-
-  rfidString.toUpperCase();
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
 }
 
-void rfidShowToSerial() {
-  Serial.println();
-  Serial.print(F(" UID tag :"));
-  Serial.print(rfidString);
-  Serial.println();
+// Firebase
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void firebaseSetup() {
+  Serial.printf("Firebase Client v%s\n\n", FIREBASE_CLIENT_VERSION);
+
+  config.api_key = API_KEY;
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+  config.database_url = DATABASE_URL;
+  config.token_status_callback = tokenStatusCallback;
+
+#if defined(ESP8266)
+  fbdo.setBSSLBufferSize(2048, 2048);
+#endif
+
+  fbdo.setResponseSize(2048);
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+  Firebase.setDoubleDigits(5);
+  config.timeout.serverResponse = 10 * 1000;
 }
