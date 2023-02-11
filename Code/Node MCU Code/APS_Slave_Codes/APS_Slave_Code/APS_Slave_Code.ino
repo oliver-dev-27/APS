@@ -1,7 +1,7 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.4
-// Firebase & RFID Test Code - Merge Firebase Code and RFID Code
+// v0.0.5
+// Firebase & RFID Test Code - Check RFID on Firebase
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
@@ -29,8 +29,8 @@
 
 // TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.4"
-#define FEATURE "Firebase & RFID Test Code - Merge Firebase Code and RFID Code"
+#define VERSION "v0.0.5"
+#define FEATURE "Firebase & RFID Test Code - Check RFID on Firebase"
 
 // WIFI
 #define WIFI_SSID "********"
@@ -75,11 +75,13 @@ void setup() {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void loop() {
   if (Firebase.ready()) {
+
     if (!rfidRead())
       return;
 
     rfidGet();
     rfidShowToSerial();
+    findRFID();
   }
 }
 
@@ -141,7 +143,7 @@ void poleRegistration() {
 
     Serial.println(devID);
 
-    if (strstr(devID, DEV_ID)) {
+    if (strcmp(devID, DEV_ID) == 0) {
       Serial.println(DEV_ID " FOUND! No need to register.");
     } else if (strstr(devID, "path not exist")) {
       Serial.println(DEV_ID " NOT FOUND! Registration in progress...");
@@ -189,4 +191,19 @@ void rfidShowToSerial() {
   Serial.print(F(" UID tag :"));
   Serial.print(rfidString);
   Serial.println();
+}
+
+void findRFID() {
+  char rfidCharArray[16] = "";
+  String path = "/vehicles/" + rfidString + "/rfid";
+  strcpy(rfidCharArray, Firebase.RTDB.getString(&fbdo, path.c_str()) ? fbdo.to<const char *>() : fbdo.errorReason().c_str());
+
+  Serial.println(rfidCharArray);
+
+  if (strcmp(rfidCharArray, rfidString.c_str()) == 0) {
+    Serial.println(rfidString + " FOUND!");
+    FirebaseJson json;
+  } else if (strstr(rfidCharArray, "path not exist")) {
+    Serial.println(rfidString + " NOT FOUND!");
+  }
 }
