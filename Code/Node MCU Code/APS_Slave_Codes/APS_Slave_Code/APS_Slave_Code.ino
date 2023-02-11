@@ -1,7 +1,7 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.3
-// Firebase Test Code - Can Register Pole to Firebase
+// v0.0.4
+// Firebase & RFID Test Code - Merge Firebase Code and RFID Code
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
@@ -20,13 +20,17 @@
 #include <addons/TokenHelper.h>
 #include <addons/RTDBHelper.h>
 
+// RFID
+#include <SPI.h>
+#include <MFRC522.h>
+
 // CONSTANTS
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.3"
-#define FEATURE "Firebase Test Code - Can Register Pole to Firebase"
+#define VERSION "v0.0.4"
+#define FEATURE "Firebase & RFID Test Code - Merge Firebase Code and RFID Code"
 
 // WIFI
 #define WIFI_SSID "********"
@@ -40,6 +44,10 @@
 
 #define DEV_ID "S000001"
 
+// RFID
+const int RFID_SS_PIN = 2;
+const int RFID_RST_PIN = 0;
+
 // VARIABLES
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -48,11 +56,16 @@ FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 
+// RFID
+MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
+String rfidString = "";
+
 // SETUP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void setup() {
   Serial.begin(115200);
-  mcuShowVersion();  
+  mcuShowVersion();
+  rfidSetup();
   wifiConnect();
   firebaseSetup();
   poleRegistration();
@@ -62,6 +75,11 @@ void setup() {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void loop() {
   if (Firebase.ready()) {
+    if (!rfidRead())
+      return;
+
+    rfidGet();
+    rfidShowToSerial();
   }
 }
 
@@ -119,21 +137,56 @@ void firebaseSetup() {
 void poleRegistration() {
   if (Firebase.ready()) {
     char devID[24] = "";
-    strcpy(devID, Firebase.RTDB.getString(&fbdo, F("/poles/"DEV_ID"/id")) ? fbdo.to<const char *>() : fbdo.errorReason().c_str());
+    strcpy(devID, Firebase.RTDB.getString(&fbdo, F("/poles/" DEV_ID "/id")) ? fbdo.to<const char *>() : fbdo.errorReason().c_str());
 
     Serial.println(devID);
 
     if (strstr(devID, DEV_ID)) {
-      Serial.println(DEV_ID" FOUND! No need to register.");
+      Serial.println(DEV_ID " FOUND! No need to register.");
     } else if (strstr(devID, "path not exist")) {
-      Serial.println(DEV_ID" NOT FOUND! Registration in progress...");
+      Serial.println(DEV_ID " NOT FOUND! Registration in progress...");
       FirebaseJson json;
 
       json.set("id", F(DEV_ID));
       json.set("availability", 0);
       json.set("location/lat", F("00.000000"));
       json.set("location/lon", F("000.000000"));
-      Serial.printf("Set "DEV_ID"... %s\n", Firebase.RTDB.set(&fbdo, F("/poles/"DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
+      Serial.printf("Set " DEV_ID "... %s\n", Firebase.RTDB.set(&fbdo, F("/poles/" DEV_ID), &json) ? "ok" : fbdo.errorReason().c_str());
     }
   }
+}
+
+// RFID
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void rfidSetup() {
+  SPI.begin();
+  rfid.PCD_Init();
+}
+
+bool rfidRead() {
+  if (!rfid.PICC_IsNewCardPresent())
+    return false;
+
+  if (!rfid.PICC_ReadCardSerial())
+    return false;
+
+  return true;
+}
+
+void rfidGet() {
+  rfidString = "";
+
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    rfidString.concat(String(rfid.uid.uidByte[i] < 0x10 ? " 0" : " "));
+    rfidString.concat(String(rfid.uid.uidByte[i], HEX));
+  }
+
+  rfidString.toUpperCase();
+}
+
+void rfidShowToSerial() {
+  Serial.println();
+  Serial.print(F(" UID tag :"));
+  Serial.print(rfidString);
+  Serial.println();
 }
