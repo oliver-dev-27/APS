@@ -1,7 +1,7 @@
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // APS Slave Code
-// v0.0.5
-// Firebase & RFID Test Code - Check RFID on Firebase
+// v0.0.6
+// Firebase & RFID Test Code - Check RFID on Firebase and Light LED if verified
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // LIBRARIES
@@ -29,8 +29,8 @@
 
 // TITLE
 #define TITLE "APS Slave Code"
-#define VERSION "v0.0.5"
-#define FEATURE "Firebase & RFID Test Code - Check RFID on Firebase"
+#define VERSION "v0.0.6"
+#define FEATURE "Check RFID on Firebase and Light LED if verified"
 
 // WIFI
 #define WIFI_SSID "********"
@@ -48,6 +48,10 @@
 const int RFID_SS_PIN = 2;
 const int RFID_RST_PIN = 0;
 
+// RGB
+const int RGB_G_PIN = 5;
+const int RGB_R_PIN = 4;
+
 // VARIABLES
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -63,6 +67,7 @@ String rfidString = "";
 // SETUP
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void setup() {
+  rgbSetup();
   Serial.begin(115200);
   mcuShowVersion();
   rfidSetup();
@@ -202,8 +207,28 @@ void findRFID() {
 
   if (strcmp(rfidCharArray, rfidString.c_str()) == 0) {
     Serial.println(rfidString + " FOUND!");
-    FirebaseJson json;
+    rgbGreenOn();
   } else if (strstr(rfidCharArray, "path not exist")) {
     Serial.println(rfidString + " NOT FOUND!");
+    rgbRedOn();
   }
+}
+
+// LED
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void rgbSetup() {
+  pinMode(RGB_G_PIN, OUTPUT);
+  pinMode(RGB_R_PIN, OUTPUT);
+
+  rgbRedOn();
+}
+
+void rgbGreenOn() {
+  digitalWrite(RGB_G_PIN, HIGH);
+  digitalWrite(RGB_R_PIN, LOW);
+}
+
+void rgbRedOn() {
+  digitalWrite(RGB_R_PIN, HIGH);
+  digitalWrite(RGB_G_PIN, LOW);
 }
